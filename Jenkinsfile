@@ -23,7 +23,11 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                git branch: 'main', url: "${REPO_URL}"
+                sh '''
+                    rm -rf ./* ./.[!.]* 2>/dev/null || true
+                    git clone "${REPO_URL}" .
+                    git log -1 --oneline
+                '''
             }
         }
 
@@ -72,13 +76,32 @@ pipeline {
                 sshagent(credentials: ['ec2-ssh-key']) {
                     sh '''
                         for i in $(seq 1 30); do
-                            ssh -o StrictHostKeyChecking=no \
-                                -o UserKnownHostsFile=/dev/null \
-                                -o ConnectTimeout=5 \
-                                ec2-user@${EC2_IP} "cloud-init status --wait" && break
-                            echo "SSH not ready yet (attempt $i)..."
-                            sleep 10
+                            STATUS=$(ssh -o StrictHostKeyChecking=no \
+                                        -o UserKnownHostsFile=/dev/null \
+                                        -o ConnectTimeout=5 \
+                                        ec2-user@${EC2_IP} \
+                                        "cloud-init status --wait --long 2>/dev/null | grep -E '^status:' | awk '{print \\$2}'" \
+                                        2>/dev/null || echo "ssh-fail")
+
+                            case "$STATUS" in
+                                done)
+                                    echo "cloud-init finished successfully"
+                                    exit 0
+                                    ;;
+                                error)
+                                    echo "cloud-init FAILED on the instance. Dumping last 60 lines:"
+                                    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                                        ec2-user@${EC2_IP} "sudo tail -60 /var/log/cloud-init-output.log" || true
+                                    exit 1
+                                    ;;
+                                *)
+                                    echo "cloud-init not ready yet (attempt $i, status=$STATUS)..."
+                                    sleep 10
+                                    ;;
+                            esac
                         done
+                        echo "cloud-init did not finish in time"
+                        exit 1
                     '''
                 }
             }

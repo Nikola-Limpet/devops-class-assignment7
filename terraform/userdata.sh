@@ -5,14 +5,18 @@ set -euxo pipefail
 # and to be usable for additional DevOps tooling (Jenkins agent, monitoring,
 # curl-based testing, etc.).
 
-dnf update -y
+# `dnf update` on AL2023 can pull in a full `curl` package that conflicts with
+# the preinstalled `curl-minimal`. `--allowerasing` lets dnf replace the
+# conflicting package instead of aborting the whole transaction.
+dnf update -y --allowerasing
 
-# Core tooling
-dnf install -y docker git curl jq tar gzip unzip
+# Core tooling. Don't add plain `curl` — curl-minimal already provides the
+# `curl` command on AL2023.
+dnf install -y --allowerasing docker git jq tar gzip unzip
 
 # Java 17 — makes this instance capable of hosting a Jenkins agent / SSH slave
 # if you later want to extend the pipeline.
-dnf install -y java-17-amazon-corretto
+dnf install -y --allowerasing java-17-amazon-corretto
 
 systemctl enable --now docker
 
