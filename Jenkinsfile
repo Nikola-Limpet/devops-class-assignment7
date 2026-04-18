@@ -11,6 +11,7 @@ pipeline {
         TF_DIR        = 'terraform'
         AWS_REGION    = 'us-east-1'
         KEY_NAME      = 'foodexpress-key'
+        REPO_URL      = 'https://github.com/Nikola-Limpet/devops-class-assignment7.git'
     }
 
     options {
@@ -22,7 +23,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                checkout scm
+                git branch: 'main', url: "${REPO_URL}"
             }
         }
 
@@ -70,8 +71,6 @@ pipeline {
             steps {
                 sshagent(credentials: ['ec2-ssh-key']) {
                     sh '''
-                        # Retry SSH until the instance accepts connections, then block
-                        # until cloud-init (user_data) finishes installing Docker.
                         for i in $(seq 1 30); do
                             ssh -o StrictHostKeyChecking=no \
                                 -o UserKnownHostsFile=/dev/null \
@@ -104,15 +103,15 @@ pipeline {
                         ssh -o StrictHostKeyChecking=no \
                             -o UserKnownHostsFile=/dev/null \
                             ec2-user@${EC2_IP} bash -s <<EOF
-                                set -e
-                                docker load -i /tmp/${IMAGE_TAR}
-                                docker rm -f ${APP_NAME} 2>/dev/null || true
-                                docker run -d \
-                                    --name ${APP_NAME} \
-                                    --restart unless-stopped \
-                                    -p ${APP_HOST_PORT}:${APP_CONT_PORT} \
-                                    ${IMAGE_NAME}:${IMAGE_TAG}
-                                rm -f /tmp/${IMAGE_TAR}
+set -e
+docker load -i /tmp/${IMAGE_TAR}
+docker rm -f ${APP_NAME} 2>/dev/null || true
+docker run -d \
+    --name ${APP_NAME} \
+    --restart unless-stopped \
+    -p ${APP_HOST_PORT}:${APP_CONT_PORT} \
+    ${IMAGE_NAME}:${IMAGE_TAG}
+rm -f /tmp/${IMAGE_TAR}
 EOF
                     '''
                 }
@@ -121,22 +120,19 @@ EOF
 
         stage('Smoke Test') {
             steps {
-                // TODO (student contribution): implement the health check.
-                //
-                // Goal: hit http://${EC2_IP}/menu from the Jenkins runner and
-                // fail the build if the app isn't returning a healthy response.
-                //
-                // Things to decide:
-                //   1. How many retries + what delay? The container starts fast
-                //      but the docker run + network settle can take a few seconds.
-                //   2. What counts as "healthy"? HTTP 200 alone, or should you also
-                //      assert that the JSON body contains "success":true ?
-                //   3. On failure, do you want to dump `docker logs` from the EC2
-                //      to make debugging easier? (Bonus marks in real life.)
-                //
-                // Replace the echo below with your implementation.
                 sh '''
-                    echo "TODO: curl http://${EC2_IP}/menu with retries and fail on non-2xx"
+                    for i in $(seq 1 10); do
+                        if curl -fs "http://${EC2_IP}/menu" > /dev/null; then
+                            echo "App is healthy at http://${EC2_IP}/menu"
+                            exit 0
+                        fi
+                        echo "Waiting for app (attempt $i)..."
+                        sleep 3
+                    done
+                    echo "App did not become healthy, dumping container logs:"
+                    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                        ec2-user@${EC2_IP} "docker logs ${APP_NAME}" || true
+                    exit 1
                 '''
             }
         }
@@ -147,7 +143,7 @@ EOF
             echo "FoodExpress is live at http://${env.EC2_IP}/menu"
         }
         failure {
-            echo "Pipeline failed. Check the stage logs above. EC2 IP (if provisioned): ${env.EC2_IP}"
+            echo "Pipeline failed. EC2 IP (if provisioned): ${env.EC2_IP}"
         }
         always {
             sh 'rm -f ${IMAGE_TAR} || true'
