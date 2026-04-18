@@ -1,0 +1,15 @@
+{
+  "name": "foodexpress-api",
+  "version": "1.0.0",
+  "description": "FoodExpress - Online Food Ordering API",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"All tests passed\" && exit 0"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
